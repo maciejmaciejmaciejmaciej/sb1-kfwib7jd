@@ -1,6 +1,6 @@
-import { Modal, View, Text, StyleSheet, Pressable } from 'react-native';
+import { Modal, View, Text, StyleSheet, Pressable, Alert } from 'react-native';
 import { X, Clock, ShoppingBag, Car } from 'lucide-react-native';
-import { format, differenceInMinutes, differenceInHours } from 'date-fns';
+import { format } from 'date-fns';
 import { useUpdateOrderStatus } from '../hooks/useWooCommerce';
 import { useQueryClient } from '@tanstack/react-query';
 
@@ -16,49 +16,24 @@ export function AcceptOrderModal({ visible, onClose, orderId, orderType, orderTi
   const updateStatus = useUpdateOrderStatus();
   const queryClient = useQueryClient();
 
-  const getTimeDisplay = () => {
-    const now = new Date();
-    const orderDate = new Date(orderTime * 1000);
-    const minutesDiff = differenceInMinutes(orderDate, now);
-    const hoursDiff = differenceInHours(orderDate, now);
-
-    if (Math.abs(hoursDiff) >= 1) {
-      return `${Math.abs(hoursDiff)} godzin${hoursDiff < 0 ? ' temu' : ''}`;
-    } else {
-      return `${Math.abs(minutesDiff)} minut${minutesDiff < 0 ? ' temu' : ''}`;
-    }
-  };
-
   const handleAccept = async () => {
     try {
       await updateStatus.mutateAsync({ orderId, status: 'processing' });
-      
-      // Show success message
-      const successMessage = document.createElement('div');
-      successMessage.textContent = 'Dodano do kolejki';
-      successMessage.style.cssText = `
-        position: fixed;
-        top: 20px;
-        left: 50%;
-        transform: translateX(-50%);
-        background-color: #DCFCE7;
-        color: #15803D;
-        padding: 12px 24px;
-        border-radius: 8px;
-        font-weight: 500;
-        z-index: 9999;
-      `;
-      document.body.appendChild(successMessage);
-      
-      // Remove success message after 1 second
-      setTimeout(() => {
-        document.body.removeChild(successMessage);
-      }, 1000);
-
       onClose();
       queryClient.invalidateQueries({ queryKey: ['orders'] });
+      
+      Alert.alert(
+        'Zamówienie zaakceptowane',
+        'Zamówienie zostało dodane do kolejki',
+        [{ text: 'OK' }]
+      );
     } catch (error) {
       console.error('Failed to accept order:', error);
+      Alert.alert(
+        'Błąd',
+        'Nie udało się zaakceptować zamówienia',
+        [{ text: 'OK' }]
+      );
     }
   };
 
@@ -78,25 +53,33 @@ export function AcceptOrderModal({ visible, onClose, orderId, orderType, orderTi
           </View>
 
           <View style={styles.content}>
-            <View style={styles.infoRow}>
-              {orderType === 'delivery' ? (
-                <Car size={24} color="#0073E6" />
-              ) : (
-                <ShoppingBag size={24} color="#0073E6" />
-              )}
-              <Text style={styles.infoText}>
-                {orderType === 'delivery' ? 'Dowóz' : 'Odbiór'}
-              </Text>
-            </View>
+            <Text style={styles.info}>
+              Zamówienie trafi do kolejki zamówień. Zaakceptowane zamówienie możesz edytować oraz zmieniać jego status.
+            </Text>
 
-            <View style={styles.infoRow}>
-              <Clock size={24} color="#0073E6" />
-              <Text style={styles.infoText}>{getTimeDisplay()}</Text>
+            <View style={styles.detailsContainer}>
+              <Text style={styles.detailsTitle}>Na kiedy:</Text>
+              <View style={styles.detailsRow}>
+                <Clock size={24} color="#0073E6" />
+                <Text style={styles.detailsText}>
+                  {format(new Date(orderTime * 1000), 'HH:mm')}
+                </Text>
+              </View>
+              <View style={styles.detailsRow}>
+                {orderType === 'delivery' ? (
+                  <Car size={24} color="#0073E6" />
+                ) : (
+                  <ShoppingBag size={24} color="#0073E6" />
+                )}
+                <Text style={styles.detailsText}>
+                  {orderType === 'delivery' ? 'Dowóz' : 'Odbiór'}
+                </Text>
+              </View>
             </View>
           </View>
 
           <Pressable style={styles.acceptButton} onPress={handleAccept}>
-            <Text style={styles.acceptButtonText}>Dodaj do kolejki</Text>
+            <Text style={styles.acceptButtonText}>OK - przyjęte</Text>
           </Pressable>
         </View>
       </View>
@@ -108,13 +91,13 @@ const styles = StyleSheet.create({
   overlay: {
     flex: 1,
     backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    justifyContent: 'flex-end',
+    justifyContent: 'center',
   },
   modal: {
     backgroundColor: '#FFFFFF',
-    borderTopLeftRadius: 16,
-    borderTopRightRadius: 16,
-    padding: 16,
+    margin: 16,
+    borderRadius: 16,
+    padding: 24,
   },
   header: {
     flexDirection: 'row',
@@ -123,7 +106,7 @@ const styles = StyleSheet.create({
     marginBottom: 24,
   },
   title: {
-    fontSize: 20,
+    fontSize: 24,
     fontWeight: '600',
     color: '#111827',
   },
@@ -131,15 +114,32 @@ const styles = StyleSheet.create({
     padding: 4,
   },
   content: {
-    gap: 16,
+    gap: 24,
     marginBottom: 24,
   },
-  infoRow: {
+  info: {
+    fontSize: 16,
+    color: '#374151',
+    lineHeight: 24,
+  },
+  detailsContainer: {
+    backgroundColor: '#F3F4F6',
+    padding: 16,
+    borderRadius: 12,
+    gap: 12,
+  },
+  detailsTitle: {
+    fontSize: 16,
+    fontWeight: '500',
+    color: '#111827',
+    marginBottom: 4,
+  },
+  detailsRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
   },
-  infoText: {
+  detailsText: {
     fontSize: 16,
     color: '#374151',
   },

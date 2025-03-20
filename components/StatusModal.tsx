@@ -1,4 +1,4 @@
-import { Modal, View, Text, StyleSheet, Pressable } from 'react-native';
+import { Modal, View, Text, StyleSheet, Pressable, Alert } from 'react-native';
 import { X } from 'lucide-react-native';
 import { useUpdateOrderStatus } from '../hooks/useWooCommerce';
 import { useQueryClient } from '@tanstack/react-query';
@@ -26,33 +26,23 @@ export function StatusModal({ visible, onClose, orderId, currentStatus }: Status
   const handleStatusChange = async (status: string) => {
     try {
       await updateStatus.mutateAsync({ orderId, status });
-      // Show success message
-      const successMessage = document.createElement('div');
-      successMessage.textContent = 'Status zmieniony';
-      successMessage.style.cssText = `
-        position: fixed;
-        top: 20px;
-        left: 50%;
-        transform: translateX(-50%);
-        background-color: #DCFCE7;
-        color: #15803D;
-        padding: 12px 24px;
-        border-radius: 8px;
-        font-weight: 500;
-        z-index: 9999;
-      `;
-      document.body.appendChild(successMessage);
-      
-      // Remove success message after 1 second
-      setTimeout(() => {
-        document.body.removeChild(successMessage);
-      }, 1000);
-
-      // Close modal and refresh data
       onClose();
       queryClient.invalidateQueries({ queryKey: ['orders'] });
+      
+      // Show success feedback
+      const statusLabel = STATUS_OPTIONS.find(opt => opt.value === status)?.label;
+      Alert.alert(
+        'Status zmieniony',
+        `Status zamówienia został zmieniony na: ${statusLabel}`,
+        [{ text: 'OK' }]
+      );
     } catch (error) {
       console.error('Failed to update status:', error);
+      Alert.alert(
+        'Błąd',
+        'Nie udało się zmienić statusu zamówienia',
+        [{ text: 'OK' }]
+      );
     }
   };
 

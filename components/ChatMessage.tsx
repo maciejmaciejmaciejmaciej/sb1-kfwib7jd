@@ -1,21 +1,30 @@
-import { View, Text, StyleSheet, Image, Pressable } from 'react-native';
+import { View, Text, StyleSheet, Pressable } from 'react-native';
 import { format } from 'date-fns';
-import { Image as ExpoImage } from 'expo-image';
+import { Image } from 'expo-image';
+import { AudioPlayer } from './AudioPlayer';
 
 interface ChatMessageProps {
   message: string;
   timestamp: string;
   isAI: boolean;
   media?: string;
+  audio?: string;
   onMediaPress?: () => void;
 }
 
-export function ChatMessage({ message, timestamp, isAI, media, onMediaPress }: ChatMessageProps) {
+export function ChatMessage({ 
+  message, 
+  timestamp, 
+  isAI, 
+  media, 
+  audio,
+  onMediaPress 
+}: ChatMessageProps) {
   return (
     <View style={[styles.container, isAI ? styles.aiContainer : styles.userContainer]}>
       {media && (
         <Pressable onPress={onMediaPress}>
-          <ExpoImage
+          <Image
             source={{ uri: media }}
             style={styles.media}
             contentFit="cover"
@@ -23,9 +32,15 @@ export function ChatMessage({ message, timestamp, isAI, media, onMediaPress }: C
           />
         </Pressable>
       )}
+      
+      {audio && (
+        <AudioPlayer uri={audio} />
+      )}
+      
       <Text style={[styles.message, isAI ? styles.aiMessage : styles.userMessage]}>
         {message}
       </Text>
+      
       <Text style={[styles.timestamp, isAI ? styles.aiTimestamp : styles.userTimestamp]}>
         {format(new Date(timestamp), 'HH:mm')}
       </Text>

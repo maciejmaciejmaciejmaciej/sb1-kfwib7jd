@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, Switch, Pressable, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, Switch, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { StoreDomainSection } from '../../components/StoreDomainSection';
 import { FlashList } from '@shopify/flash-list';
 import { AlertCircle } from 'lucide-react-native';
 import { useProducts } from '../../hooks/useWooCommerce';
@@ -10,9 +11,8 @@ import { WooCommerceSettings } from '../../utils/types';
 export default function MenuScreen() {
   const [settings, setSettings] = useState<WooCommerceSettings | null>(null);
   const [isLoading, setIsLoading] = useState(true);
-  const { data: allProducts = [], isLoading: productsLoading, error } = useProducts();
+  const { data: allProducts = [], isLoading: productsLoading } = useProducts();
 
-  // Load settings when component mounts
   useEffect(() => {
     const loadSettings = async () => {
       try {
@@ -27,7 +27,6 @@ export default function MenuScreen() {
     loadSettings();
   }, []);
 
-  // Filter products by preferred category
   const products = settings?.preferredCategory
     ? allProducts.filter(product => 
         product.categories?.some(cat => cat.id.toString() === settings.preferredCategory)
@@ -37,22 +36,12 @@ export default function MenuScreen() {
   if (isLoading || productsLoading) {
     return (
       <SafeAreaView style={styles.container}>
+        <View style={styles.header}>
+          <Text style={styles.title}>Menu</Text>
+        </View>
+        <StoreDomainSection />
         <View style={styles.centered}>
           <ActivityIndicator size="large" color="#0073E6" />
-        </View>
-      </SafeAreaView>
-    );
-  }
-
-  if (error) {
-    return (
-      <SafeAreaView style={styles.container}>
-        <View style={styles.centered}>
-          <AlertCircle size={48} color="#DC2626" />
-          <Text style={styles.errorTitle}>Error Loading Products</Text>
-          <Text style={styles.errorMessage}>
-            {error instanceof Error ? error.message : 'Failed to load products'}
-          </Text>
         </View>
       </SafeAreaView>
     );
@@ -61,11 +50,15 @@ export default function MenuScreen() {
   if (!settings?.preferredCategory) {
     return (
       <SafeAreaView style={styles.container}>
+        <View style={styles.header}>
+          <Text style={styles.title}>Menu</Text>
+        </View>
+        <StoreDomainSection />
         <View style={styles.centered}>
-          <AlertCircle size={48} color="#0073E6" />
-          <Text style={styles.warningTitle}>No Category Selected</Text>
-          <Text style={styles.warningMessage}>
-            Please select a preferred category in Settings to view products.
+          <AlertCircle size={48} color="#DC2626" />
+          <Text style={styles.errorTitle}>No Category Selected</Text>
+          <Text style={styles.errorMessage}>
+            Please select a preferred category in Settings first.
           </Text>
         </View>
       </SafeAreaView>
@@ -75,6 +68,10 @@ export default function MenuScreen() {
   if (products.length === 0) {
     return (
       <SafeAreaView style={styles.container}>
+        <View style={styles.header}>
+          <Text style={styles.title}>Menu</Text>
+        </View>
+        <StoreDomainSection />
         <View style={styles.centered}>
           <Text style={styles.emptyTitle}>No Products Found</Text>
           <Text style={styles.emptyMessage}>
@@ -90,7 +87,7 @@ export default function MenuScreen() {
       <View style={styles.header}>
         <Text style={styles.title}>Menu</Text>
       </View>
-
+      <StoreDomainSection />
       <FlashList
         data={products}
         renderItem={({ item }) => (
@@ -119,12 +116,6 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#F3F4F6',
   },
-  centered: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 20,
-  },
   header: {
     padding: 16,
     backgroundColor: '#FFFFFF',
@@ -135,6 +126,35 @@ const styles = StyleSheet.create({
     fontSize: 24,
     fontWeight: '600',
     color: '#111827',
+  },
+  centered: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  errorTitle: {
+    fontSize: 20,
+    fontWeight: '600',
+    color: '#DC2626',
+    marginTop: 16,
+    marginBottom: 8,
+  },
+  errorMessage: {
+    fontSize: 16,
+    color: '#6B7280',
+    textAlign: 'center',
+  },
+  emptyTitle: {
+    fontSize: 20,
+    fontWeight: '600',
+    color: '#374151',
+    marginBottom: 8,
+  },
+  emptyMessage: {
+    fontSize: 16,
+    color: '#6B7280',
+    textAlign: 'center',
   },
   list: {
     padding: 16,
@@ -165,40 +185,5 @@ const styles = StyleSheet.create({
   productPrice: {
     fontSize: 14,
     color: '#6B7280',
-  },
-  errorTitle: {
-    fontSize: 20,
-    fontWeight: '600',
-    color: '#DC2626',
-    marginTop: 16,
-    marginBottom: 8,
-  },
-  errorMessage: {
-    fontSize: 16,
-    color: '#6B7280',
-    textAlign: 'center',
-  },
-  warningTitle: {
-    fontSize: 20,
-    fontWeight: '600',
-    color: '#0073E6',
-    marginTop: 16,
-    marginBottom: 8,
-  },
-  warningMessage: {
-    fontSize: 16,
-    color: '#6B7280',
-    textAlign: 'center',
-  },
-  emptyTitle: {
-    fontSize: 20,
-    fontWeight: '600',
-    color: '#374151',
-    marginBottom: 8,
-  },
-  emptyMessage: {
-    fontSize: 16,
-    color: '#6B7280',
-    textAlign: 'center',
   },
 });

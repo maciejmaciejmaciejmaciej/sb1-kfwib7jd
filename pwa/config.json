@@ -1,0 +1,27 @@
+{
+  "app": {
+    "name": "Restaurant Manager",
+    "shortName": "RestManager",
+    "description": "Restaurant order management system",
+    "themeColor": "#0073E6",
+    "backgroundColor": "#FFFFFF",
+    "lang": "pl"
+  },
+  "web": {
+    "startUrl": "/",
+    "display": "standalone",
+    "orientation": "portrait"
+  },
+  "icons": {
+    "favicon": "./assets/images/favicon.png",
+    "pwa": {
+      "192": "./assets/images/icon.png",
+      "512": "./assets/images/icon.png"
+    },
+    "splash": {
+      "image": "./assets/images/splash.png",
+      "backgroundColor": "#FFFFFF",
+      "resizeMode": "contain"
+    }
+  }
+}

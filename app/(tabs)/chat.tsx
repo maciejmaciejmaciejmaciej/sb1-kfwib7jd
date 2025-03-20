@@ -9,13 +9,16 @@ import {
   KeyboardAvoidingView,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { StoreDomainSection } from '../../components/StoreDomainSection';
 import { FlashList } from '@shopify/flash-list';
-import { Image, Send, X } from 'lucide-react-native';
+import { Image, Send } from 'lucide-react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { ChatMessage } from '../../components/ChatMessage';
 import { ImagePreview } from '../../components/ImagePreview';
-import { ErrorModal } from '../../components/ErrorModal';
 import { useSendMessage } from '../../hooks/useMake';
+import { useToast } from '../../contexts/ToastContext';
+import { VoiceRecorder } from '../../components/VoiceRecorder';
+import { useAuth } from '../../contexts/AuthContext';
 
 interface Message {
   id: string;
@@ -23,6 +26,7 @@ interface Message {
   isAI: boolean;
   timestamp: string;
   media?: string;
+  audio?: string;
 }
 
 export default function ChatScreen() {
@@ -30,48 +34,66 @@ export default function ChatScreen() {
   const [messages, setMessages] = useState<Message[]>([
     {
       id: '1',
-      text: 'Hello! How can I help you today?',
+      text: 'Co jest?',
       isAI: true,
       timestamp: new Date().toISOString(),
     },
   ]);
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
   const [previewImage, setPreviewImage] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
   const listRef = useRef<FlashList<Message>>(null);
   const { mutateAsync: sendMessage, isPending } = useSendMessage();
+  const { showToast } = useToast();
+  const { user } = useAuth();
 
   const handleSend = async () => {
     if ((!message.trim() && !selectedImage) || isPending) return;
 
-    const newMessage: Message = {
+    const userMessage: Message = {
       id: Date.now().toString(),
       text: message,
       isAI: false,
       timestamp: new Date().toISOString(),
-      media: selectedImage || undefined,
+      media: selectedImage,
     };
 
-    setMessages(prev => [newMessage, ...prev]);
+    setMessages(prev => [userMessage, ...prev]);
     setMessage('');
     setSelectedImage(null);
 
     try {
       const response = await sendMessage({
         message: message.trim(),
-        media: selectedImage || undefined,
+        media: selectedImage,
+        user
       });
 
-      if (response.message) {
-        setMessages(prev => [{
-          id: (Date.now() + 1).toString(),
-          text: response.message,
-          isAI: true,
-          timestamp: new Date().toISOString(),
-        }, ...prev]);
+      let responseText = '';
+      if (typeof response === 'string') {
+        responseText = response;
+      } else if (response?.message) {
+        responseText = response.message;
+      } else {
+        responseText = 'Sorry, I did not understand the response.';
       }
+
+      const aiMessage: Message = {
+        id: (Date.now() + 1).toString(),
+        text: responseText,
+        isAI: true,
+        timestamp: new Date().toISOString(),
+      };
+      setMessages(prev => [aiMessage, ...prev]);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to send message');
+      showToast('Failed to send message. Please try again.', 'error');
+      
+      const errorMessage: Message = {
+        id: (Date.now() + 1).toString(),
+        text: 'Sorry, I encountered an error processing your request. Please try again.',
+        isAI: true,
+        timestamp: new Date().toISOString(),
+      };
+      setMessages(prev => [errorMessage, ...prev]);
     }
   };
 
@@ -84,6 +106,46 @@ export default function ChatScreen() {
 
     if (!result.canceled && result.assets[0]) {
       setSelectedImage(result.assets[0].uri);
+      showToast('Image selected successfully', 'success');
+    }
+  };
+
+  const handleVoiceRecordingComplete = async (audioUri: string) => {
+    const voiceMessage: Message = {
+      id: Date.now().toString(),
+      text: '🎤 Voice message',
+      isAI: false,
+      timestamp: new Date().toISOString(),
+      audio: audioUri,
+    };
+
+    setMessages(prev => [voiceMessage, ...prev]);
+
+    try {
+      const response = await sendMessage({
+        message: '[Voice Message]',
+        media: audioUri,
+        user
+      });
+
+      let responseText = '';
+      if (typeof response === 'string') {
+        responseText = response;
+      } else if (response?.message) {
+        responseText = response.message;
+      } else {
+        responseText = 'Sorry, I did not understand the voice message.';
+      }
+
+      const aiMessage: Message = {
+        id: (Date.now() + 1).toString(),
+        text: responseText,
+        isAI: true,
+        timestamp: new Date().toISOString(),
+      };
+      setMessages(prev => [aiMessage, ...prev]);
+    } catch (err) {
+      showToast('Failed to process voice message', 'error');
     }
   };
 
@@ -92,6 +154,8 @@ export default function ChatScreen() {
       <View style={styles.header}>
         <Text style={styles.title}>AI Manager</Text>
       </View>
+
+      <StoreDomainSection />
 
       <KeyboardAvoidingView
         style={styles.content}
@@ -109,6 +173,7 @@ export default function ChatScreen() {
               timestamp={item.timestamp}
               isAI={item.isAI}
               media={item.media}
+              audio={item.audio}
               onMediaPress={() => item.media && setPreviewImage(item.media)}
             />
           )}
@@ -119,7 +184,10 @@ export default function ChatScreen() {
             <View style={styles.imagePreview}>
               <Pressable
                 style={styles.removeImage}
-                onPress={() => setSelectedImage(null)}>
+                onPress={() => {
+                  setSelectedImage(null);
+                  showToast('Image removed', 'success');
+                }}>
                 <X size={20} color="#FFFFFF" />
               </Pressable>
             </View>
@@ -130,6 +198,9 @@ export default function ChatScreen() {
               onPress={handleImagePick}>
               <Image size={24} color="#6B7280" />
             </Pressable>
+            
+            <VoiceRecorder onRecordingComplete={handleVoiceRecordingComplete} />
+            
             <TextInput
               style={styles.input}
               value={message}
@@ -158,12 +229,6 @@ export default function ChatScreen() {
         visible={!!previewImage}
         uri={previewImage || ''}
         onClose={() => setPreviewImage(null)}
-      />
-
-      <ErrorModal
-        visible={!!error}
-        message={error || ''}
-        onClose={() => setError(null)}
       />
     </SafeAreaView>
   );

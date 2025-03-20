@@ -1,87 +1,133 @@
 import { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, TextInput, Pressable, ScrollView, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Save, Trash2 } from 'lucide-react-native';
+import { Save, AlertCircle } from 'lucide-react-native';
 import { Picker } from '@react-native-picker/picker';
 import { useCategories } from '../../hooks/useWooCommerce';
-import { WooCommerceSettings } from '../../utils/types';
+import { WooCommerceSettings, MakeSettings } from '../../utils/types';
 import { getStoredSettings, storeSettings } from '../../utils/storage';
+import { validateStoreCredentials } from '../../utils/api';
 import { useQueryClient } from '@tanstack/react-query';
+import { StoreDomainSection } from '../../components/StoreDomainSection';
+import { useToast } from '../../contexts/ToastContext';
+import { readErrorLog, clearErrorLog } from '../../utils/errorLogger';
+import { ErrorModal } from '../../components/ErrorModal';
 
 export default function SettingsScreen() {
-  const [settings, setSettings] = useState<WooCommerceSettings>({
+  const [wooSettings, setWooSettings] = useState<WooCommerceSettings>({
     consumerKey: '',
     consumerSecret: '',
     storeUrl: '',
     preferredCategory: '',
   });
+  const [makeSettings, setMakeSettings] = useState<MakeSettings>({
+    webhookUrl: '',
+  });
   const [isSaving, setIsSaving] = useState(false);
-  const [saveError, setSaveError] = useState<string | null>(null);
-  const [saveSuccess, setSaveSuccess] = useState(false);
-  const [errorLog, setErrorLog] = useState('');
+  const [isValidating, setIsValidating] = useState(false);
+  const [validationError, setValidationError] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
   const [showErrorLog, setShowErrorLog] = useState(false);
+  const [errorLogContent, setErrorLogContent] = useState('');
+  const { showToast } = useToast();
   
   const queryClient = useQueryClient();
   const { data: categories = [], isLoading: categoriesLoading } = useCategories();
 
-  // Load stored settings when component mounts
   useEffect(() => {
     const loadSettings = async () => {
       try {
-        const stored = await getStoredSettings<WooCommerceSettings>('woocommerce_settings');
-        if (stored) {
-          setSettings(stored);
+        const storedWoo = await getStoredSettings<WooCommerceSettings>('woocommerce_settings');
+        const storedMake = await getStoredSettings<MakeSettings>('make_settings');
+        
+        if (storedWoo) {
+          setWooSettings(storedWoo);
+        }
+        if (storedMake) {
+          setMakeSettings(storedMake);
         }
       } catch (error) {
         console.error('Failed to load settings:', error);
-        setSaveError('Failed to load settings');
+        showToast('Failed to load settings', 'error');
+      } finally {
+        setIsLoading(false);
       }
     };
     loadSettings();
   }, []);
 
-  const saveSettings = async () => {
-    setIsSaving(true);
-    setSaveError(null);
-    setSaveSuccess(false);
+  const validateSettings = async () => {
+    setIsValidating(true);
+    setValidationError(null);
 
     try {
-      await storeSettings('woocommerce_settings', settings);
+      const result = await validateStoreCredentials(wooSettings);
+      
+      if (!result.isValid) {
+        setValidationError(result.error || 'Invalid store settings');
+        return false;
+      }
+
+      showToast(`Successfully connected to ${result.storeName}`, 'success');
+      return true;
+    } catch (error) {
+      setValidationError('Failed to validate store settings');
+      return false;
+    } finally {
+      setIsValidating(false);
+    }
+  };
+
+  const saveSettings = async () => {
+    setIsSaving(true);
+
+    try {
+      // Validate store credentials first
+      const isValid = await validateSettings();
+      if (!isValid) {
+        return;
+      }
+
+      await storeSettings('woocommerce_settings', wooSettings);
+      await storeSettings('make_settings', makeSettings);
       await queryClient.invalidateQueries({ queryKey: ['categories'] });
       await queryClient.invalidateQueries({ queryKey: ['products'] });
       await queryClient.invalidateQueries({ queryKey: ['orders'] });
-      setSaveSuccess(true);
-      
-      // Hide success message after 3 seconds
-      setTimeout(() => {
-        setSaveSuccess(false);
-      }, 3000);
+      showToast('Settings saved successfully', 'success');
     } catch (error) {
       console.error('Failed to save settings:', error);
-      setSaveError(error instanceof Error ? error.message : 'Failed to save settings');
+      showToast('Failed to save settings', 'error');
     } finally {
       setIsSaving(false);
     }
   };
 
   const handleCategoryChange = (value: string) => {
-    setSettings(prev => ({ ...prev, preferredCategory: value }));
+    setWooSettings(prev => ({ ...prev, preferredCategory: value }));
   };
 
-  if (showErrorLog) {
+  const handleViewErrorLog = async () => {
+    const log = await readErrorLog();
+    setErrorLogContent(log);
+    setShowErrorLog(true);
+  };
+
+  const handleClearErrorLog = async () => {
+    await clearErrorLog();
+    setErrorLogContent('');
+    setShowErrorLog(false);
+    showToast('Error log cleared', 'success');
+  };
+
+  if (isLoading) {
     return (
       <SafeAreaView style={styles.container}>
         <View style={styles.header}>
-          <Text style={styles.title}>Error Log</Text>
-          <Pressable
-            style={styles.backButton}
-            onPress={() => setShowErrorLog(false)}>
-            <Text style={styles.backButtonText}>Back</Text>
-          </Pressable>
+          <Text style={styles.title}>Settings</Text>
         </View>
-        <ScrollView style={styles.errorLog}>
-          <Text style={styles.errorLogText}>{errorLog || 'No errors logged.'}</Text>
-        </ScrollView>
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color="#0073E6" />
+        </View>
       </SafeAreaView>
     );
   }
@@ -93,40 +139,46 @@ export default function SettingsScreen() {
       </View>
 
       <ScrollView style={styles.content}>
-        {saveError && (
-          <View style={styles.errorContainer}>
-            <Text style={styles.errorText}>{saveError}</Text>
-          </View>
-        )}
-
-        {saveSuccess && (
-          <View style={styles.successContainer}>
-            <Text style={styles.successText}>Settings saved successfully!</Text>
-          </View>
-        )}
+        <StoreDomainSection />
 
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>WooCommerce Settings</Text>
           
+          {validationError && (
+            <View style={styles.errorContainer}>
+              <AlertCircle size={20} color="#DC2626" />
+              <Text style={styles.errorText}>{validationError}</Text>
+            </View>
+          )}
+          
           <TextInput
             style={styles.input}
             placeholder="Store URL"
-            value={settings.storeUrl}
-            onChangeText={(text) => setSettings(prev => ({ ...prev, storeUrl: text }))}
+            value={wooSettings.storeUrl}
+            onChangeText={(text) => {
+              setValidationError(null);
+              setWooSettings(prev => ({ ...prev, storeUrl: text }));
+            }}
           />
           
           <TextInput
             style={styles.input}
             placeholder="Consumer Key"
-            value={settings.consumerKey}
-            onChangeText={(text) => setSettings(prev => ({ ...prev, consumerKey: text }))}
+            value={wooSettings.consumerKey}
+            onChangeText={(text) => {
+              setValidationError(null);
+              setWooSettings(prev => ({ ...prev, consumerKey: text }));
+            }}
           />
           
           <TextInput
             style={styles.input}
             placeholder="Consumer Secret"
-            value={settings.consumerSecret}
-            onChangeText={(text) => setSettings(prev => ({ ...prev, consumerSecret: text }))}
+            value={wooSettings.consumerSecret}
+            onChangeText={(text) => {
+              setValidationError(null);
+              setWooSettings(prev => ({ ...prev, consumerSecret: text }));
+            }}
           />
 
           <View style={styles.categoryContainer}>
@@ -135,7 +187,7 @@ export default function SettingsScreen() {
               <ActivityIndicator size="small" color="#0073E6" />
             ) : (
               <Picker
-                selectedValue={settings.preferredCategory}
+                selectedValue={wooSettings.preferredCategory}
                 onValueChange={handleCategoryChange}
                 style={styles.categoryPicker}>
                 <Picker.Item label="Select a category" value="" />
@@ -151,12 +203,43 @@ export default function SettingsScreen() {
           </View>
         </View>
 
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Make.com Settings</Text>
+          <TextInput
+            style={styles.input}
+            placeholder="Webhook URL"
+            value={makeSettings.webhookUrl}
+            onChangeText={(text) => setMakeSettings(prev => ({ ...prev, webhookUrl: text }))}
+          />
+        </View>
+
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Error Log</Text>
+          <View style={styles.errorLogButtons}>
+            <Pressable
+              style={styles.errorLogButton}
+              onPress={handleViewErrorLog}>
+              <Text style={styles.errorLogButtonText}>View Error Log</Text>
+            </Pressable>
+            <Pressable
+              style={[styles.errorLogButton, styles.errorLogClearButton]}
+              onPress={handleClearErrorLog}>
+              <Text style={[styles.errorLogButtonText, styles.errorLogClearButtonText]}>
+                Clear Log
+              </Text>
+            </Pressable>
+          </View>
+        </View>
+
         <View style={styles.buttonContainer}>
           <Pressable
-            style={[styles.saveButton, isSaving && styles.saveButtonDisabled]}
+            style={[
+              styles.saveButton, 
+              (isSaving || isValidating) && styles.saveButtonDisabled
+            ]}
             onPress={saveSettings}
-            disabled={isSaving}>
-            {isSaving ? (
+            disabled={isSaving || isValidating}>
+            {(isSaving || isValidating) ? (
               <ActivityIndicator color="#FFFFFF" size="small" />
             ) : (
               <>
@@ -165,14 +248,14 @@ export default function SettingsScreen() {
               </>
             )}
           </Pressable>
-
-          <Pressable
-            style={styles.errorLogButton}
-            onPress={() => setShowErrorLog(true)}>
-            <Text style={styles.errorLogButtonText}>View Error Log</Text>
-          </Pressable>
         </View>
       </ScrollView>
+
+      <ErrorModal
+        visible={showErrorLog}
+        message={errorLogContent || 'No errors logged'}
+        onClose={() => setShowErrorLog(false)}
+      />
     </SafeAreaView>
   );
 }
@@ -196,6 +279,11 @@ const styles = StyleSheet.create({
   content: {
     padding: 16,
   },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
   section: {
     marginBottom: 24,
   },
@@ -204,6 +292,20 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#374151',
     marginBottom: 12,
+  },
+  errorContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FEE2E2',
+    padding: 12,
+    borderRadius: 8,
+    marginBottom: 12,
+    gap: 8,
+  },
+  errorText: {
+    flex: 1,
+    color: '#DC2626',
+    fontSize: 14,
   },
   input: {
     backgroundColor: '#FFFFFF',
@@ -249,58 +351,29 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '500',
   },
+  errorLogButtons: {
+    flexDirection: 'row',
+    gap: 12,
+  },
   errorLogButton: {
-    backgroundColor: '#374151',
-    padding: 16,
+    flex: 1,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#0073E6',
+    padding: 12,
     borderRadius: 8,
     alignItems: 'center',
   },
   errorLogButtonText: {
-    color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  backButton: {
-    backgroundColor: '#E5E7EB',
-    padding: 8,
-    borderRadius: 8,
-    position: 'absolute',
-    right: 16,
-    top: 16,
-  },
-  backButtonText: {
-    color: '#374151',
+    color: '#0073E6',
     fontSize: 14,
     fontWeight: '500',
   },
-  errorLog: {
-    flex: 1,
-    padding: 16,
-    backgroundColor: '#FFFFFF',
-  },
-  errorLogText: {
-    fontSize: 14,
-    color: '#374151',
-    fontFamily: 'monospace',
-  },
-  errorContainer: {
+  errorLogClearButton: {
     backgroundColor: '#FEE2E2',
-    padding: 12,
-    borderRadius: 8,
-    marginBottom: 16,
+    borderColor: '#DC2626',
   },
-  errorText: {
+  errorLogClearButtonText: {
     color: '#DC2626',
-    fontSize: 14,
-  },
-  successContainer: {
-    backgroundColor: '#DCFCE7',
-    padding: 12,
-    borderRadius: 8,
-    marginBottom: 16,
-  },
-  successText: {
-    color: '#15803D',
-    fontSize: 14,
   },
 });

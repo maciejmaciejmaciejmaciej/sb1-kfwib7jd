@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Modal, View, Text, StyleSheet, Pressable, TextInput, ScrollView, Switch, Platform, ActivityIndicator } from 'react-native';
-import { X, Plus, Minus, AlertCircle } from 'lucide-react-native';
-import { format, addDays } from 'date-fns';
+import { X, Plus, Minus } from 'lucide-react-native';
+import { format } from 'date-fns';
 import { pl } from 'date-fns/locale';
 import { useProducts, useCreateOrder } from '../hooks/useWooCommerce';
 import { Picker } from '@react-native-picker/picker';
@@ -53,8 +53,6 @@ export function CreateOrderModal({ visible, onClose }: CreateOrderModalProps) {
     const quantity = quantities[product.id] || 0;
     return sum + (parseFloat(product.price) * quantity);
   }, 0);
-
-  const nextTenDays = Array.from({ length: 10 }, (_, i) => addDays(new Date(), i));
 
   useEffect(() => {
     const loadSettings = async () => {
@@ -209,58 +207,6 @@ export function CreateOrderModal({ visible, onClose }: CreateOrderModalProps) {
     );
   }
 
-  if (!settings?.preferredCategory) {
-    return (
-      <Modal
-        visible={visible}
-        animationType="slide"
-        transparent={true}
-        onRequestClose={onClose}>
-        <View style={styles.container}>
-          <View style={styles.header}>
-            <Text style={styles.title}>New Order</Text>
-            <Pressable style={styles.closeButton} onPress={onClose}>
-              <X size={24} color="#374151" />
-            </Pressable>
-          </View>
-          <View style={styles.errorContainer}>
-            <AlertCircle size={48} color="#DC2626" />
-            <Text style={styles.errorTitle}>No Category Selected</Text>
-            <Text style={styles.errorMessage}>
-              Please select a preferred category in Settings first.
-            </Text>
-          </View>
-        </View>
-      </Modal>
-    );
-  }
-
-  if (products.length === 0) {
-    return (
-      <Modal
-        visible={visible}
-        animationType="slide"
-        transparent={true}
-        onRequestClose={onClose}>
-        <View style={styles.container}>
-          <View style={styles.header}>
-            <Text style={styles.title}>New Order</Text>
-            <Pressable style={styles.closeButton} onPress={onClose}>
-              <X size={24} color="#374151" />
-            </Pressable>
-          </View>
-          <View style={styles.errorContainer}>
-            <AlertCircle size={48} color="#DC2626" />
-            <Text style={styles.errorTitle}>No Products Available</Text>
-            <Text style={styles.errorMessage}>
-              No products found in the selected category.
-            </Text>
-          </View>
-        </View>
-      </Modal>
-    );
-  }
-
   return (
     <Modal
       visible={visible}
@@ -325,7 +271,7 @@ export function CreateOrderModal({ visible, onClose }: CreateOrderModalProps) {
             {isDelivery && (
               <TextInput
                 style={[styles.input, { marginTop: 12 }]}
-                placeholder="Koszt dowozu"
+                placeholder="Delivery Cost"
                 value={deliveryCost}
                 onChangeText={setDeliveryCost}
                 keyboardType="numeric"
@@ -340,13 +286,17 @@ export function CreateOrderModal({ visible, onClose }: CreateOrderModalProps) {
                 selectedValue={selectedDate.toISOString()}
                 onValueChange={(value) => setSelectedDate(new Date(value))}
                 style={styles.picker}>
-                {nextTenDays.map(date => (
-                  <Picker.Item
-                    key={date.toISOString()}
-                    label={format(date, 'd MMMM yyyy', { locale: pl })}
-                    value={date.toISOString()}
-                  />
-                ))}
+                {Array.from({ length: 10 }, (_, i) => {
+                  const date = new Date();
+                  date.setDate(date.getDate() + i);
+                  return (
+                    <Picker.Item
+                      key={date.toISOString()}
+                      label={format(date, 'd MMMM yyyy', { locale: pl })}
+                      value={date.toISOString()}
+                    />
+                  );
+                })}
               </Picker>
               <Picker
                 selectedValue={selectedTime}
@@ -448,24 +398,6 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-  },
-  errorContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 16,
-  },
-  errorTitle: {
-    fontSize: 20,
-    fontWeight: '600',
-    color: '#DC2626',
-    marginTop: 16,
-    marginBottom: 8,
-  },
-  errorMessage: {
-    fontSize: 16,
-    color: '#6B7280',
-    textAlign: 'center',
   },
   content: {
     flex: 1,

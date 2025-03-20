@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Modal, View, Text, StyleSheet, Pressable, TextInput, ScrollView, Switch, Platform, ActivityIndicator } from 'react-native';
-import { X, Plus, Minus } from 'lucide-react-native';
+import { X } from 'lucide-react-native';
 import { format } from 'date-fns';
 import { pl } from 'date-fns/locale';
 import { useProducts, useUpdateOrder } from '../hooks/useWooCommerce';
@@ -14,10 +14,6 @@ interface EditOrderModalProps {
   order: any;
 }
 
-interface ProductQuantity {
-  [key: string]: number;
-}
-
 const DELIVERY_TIMES = Array.from({ length: 29 }, (_, i) => {
   const hour = Math.floor(i / 4) + 11;
   const minute = (i % 4) * 15;
@@ -26,7 +22,6 @@ const DELIVERY_TIMES = Array.from({ length: 29 }, (_, i) => {
 
 export function EditOrderModal({ visible, onClose, order }: EditOrderModalProps) {
   const [isDelivery, setIsDelivery] = useState(false);
-  const [quantities, setQuantities] = useState<ProductQuantity>({});
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [selectedTime, setSelectedTime] = useState(DELIVERY_TIMES[0]);
   const [clientName, setClientName] = useState('');
@@ -35,26 +30,16 @@ export function EditOrderModal({ visible, onClose, order }: EditOrderModalProps)
   const [streetNumber, setStreetNumber] = useState('');
   const [flatNumber, setFlatNumber] = useState('');
   const [city, setCity] = useState('');
-  const [deliveryCost, setDeliveryCost] = useState('');
+  const [note, setNote] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [isValid, setIsValid] = useState(false);
   const [settings, setSettings] = useState<WooCommerceSettings | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
-  const { data: allProducts = [], isLoading: productsLoading } = useProducts();
   const updateOrder = useUpdateOrder();
-
-  const products = settings?.preferredCategory
-    ? allProducts.filter(product => 
-        product.categories?.some(cat => cat.id.toString() === settings.preferredCategory)
-      )
-    : [];
 
   useEffect(() => {
     if (visible && order) {
-      // Reset quantities first
-      setQuantities({});
-      
       const orderMethod = order.meta_data.find((meta: any) => meta.key === 'exwfood_order_method')?.value;
       setIsDelivery(orderMethod === 'delivery');
       
@@ -84,24 +69,10 @@ export function EditOrderModal({ visible, onClose, order }: EditOrderModalProps)
       }
       
       setCity(order.billing.city || '');
-      
-      // Create a map to combine quantities for the same product
-      const quantityMap = new Map<number, number>();
-      order.line_items.forEach((item: any) => {
-        const productId = item.product_id;
-        const currentQuantity = quantityMap.get(productId) || 0;
-        quantityMap.set(productId, currentQuantity + item.quantity);
-      });
-      
-      // Convert map to object
-      const initialQuantities: ProductQuantity = {};
-      quantityMap.forEach((quantity, productId) => {
-        initialQuantities[productId] = quantity;
-      });
-      setQuantities(initialQuantities);
 
-      const deliveryCostFee = order.fee_lines.find((fee: any) => fee.name === "Koszt dowozu");
-      setDeliveryCost(deliveryCostFee?.total || '0');
+      // Get existing note if any
+      const existingNote = order.meta_data.find((meta: any) => meta.key === 'order_note')?.value;
+      setNote(existingNote || '');
     }
   }, [visible, order]);
 
@@ -143,24 +114,11 @@ export function EditOrderModal({ visible, onClose, order }: EditOrderModalProps)
         }
       }
 
-      const hasProducts = Object.values(quantities).some(q => q > 0);
-      if (!hasProducts) {
-        setIsValid(false);
-        return;
-      }
-
       setIsValid(true);
     };
 
     validate();
-  }, [settings, clientName, phoneNumber, street, streetNumber, city, isDelivery, quantities]);
-
-  const handleQuantityChange = (productId: string, change: number) => {
-    setQuantities(prev => ({
-      ...prev,
-      [productId]: Math.max(0, (prev[productId] || 0) + change),
-    }));
-  };
+  }, [settings, clientName, phoneNumber, street, streetNumber, city, isDelivery]);
 
   const handleSubmit = async () => {
     if (!isValid || !settings?.preferredCategory || !order) {
@@ -173,30 +131,7 @@ export function EditOrderModal({ visible, onClose, order }: EditOrderModalProps)
     orderDateTime.setHours(hours, minutes, 0, 0);
     const unixTimestamp = Math.floor(orderDateTime.getTime() / 1000);
 
-    // Create an array of line items with proper structure
-    const lineItems = Object.entries(quantities)
-      .filter(([_, quantity]) => quantity > 0)
-      .map(([productId, quantity]) => {
-        // Find existing line item to get the ID if it exists
-        const existingItem = order.line_items.find((item: any) => item.product_id === parseInt(productId));
-        return {
-          id: existingItem?.id, // Include line item ID if it exists
-          product_id: parseInt(productId),
-          quantity: quantity,
-        };
-      });
-
-    // Add line items to be deleted (quantity set to 0)
-    order.line_items.forEach((item: any) => {
-      if (!quantities[item.product_id]) {
-        lineItems.push({
-          id: item.id,
-          product_id: item.product_id,
-          quantity: 0,
-        });
-      }
-    });
-
+    // Preserve existing line items and fee lines
     const orderData = {
       billing: {
         first_name: clientName,
@@ -204,13 +139,12 @@ export function EditOrderModal({ visible, onClose, order }: EditOrderModalProps)
         address_1: isDelivery ? `${street} ${streetNumber}${flatNumber ? `/${flatNumber}` : ''}` : '',
         city: isDelivery ? city : '',
       },
-      line_items: lineItems,
-      fee_lines: isDelivery ? [
-        {
-          name: "Koszt dowozu",
-          total: deliveryCost || "0"
-        }
-      ] : [],
+      line_items: order.line_items.map((item: any) => ({
+        id: item.id,
+        product_id: item.product_id,
+        quantity: item.quantity
+      })),
+      fee_lines: order.fee_lines,
       meta_data: [
         {
           key: "exwfood_order_method",
@@ -219,6 +153,10 @@ export function EditOrderModal({ visible, onClose, order }: EditOrderModalProps)
         {
           key: "data_unix",
           value: unixTimestamp.toString()
+        },
+        {
+          key: "order_note",
+          value: note.trim()
         }
       ]
     };
@@ -252,7 +190,7 @@ export function EditOrderModal({ visible, onClose, order }: EditOrderModalProps)
     }
   };
 
-  if (isLoading || productsLoading) {
+  if (isLoading) {
     return (
       <Modal
         visible={visible}
@@ -297,25 +235,28 @@ export function EditOrderModal({ visible, onClose, order }: EditOrderModalProps)
         <ScrollView style={styles.content}>
           <View style={styles.productsSection}>
             <Text style={styles.sectionTitle}>Produkty</Text>
-            {products.map(product => (
-              <View key={product.id} style={styles.productRow}>
-                <Text style={styles.productName}>{product.name}</Text>
-                <Text style={styles.productPrice}>{product.price} zł</Text>
-                <View style={styles.quantityControls}>
-                  <Pressable
-                    style={styles.quantityButton}
-                    onPress={() => handleQuantityChange(product.id, -1)}>
-                    <Minus size={16} color="#374151" />
-                  </Pressable>
-                  <Text style={styles.quantity}>{quantities[product.id] || 0}</Text>
-                  <Pressable
-                    style={styles.quantityButton}
-                    onPress={() => handleQuantityChange(product.id, 1)}>
-                    <Plus size={16} color="#374151" />
-                  </Pressable>
-                </View>
+            {order?.line_items.map((item: any, index: number) => (
+              <View key={index} style={styles.productRow}>
+                <Text style={styles.productName}>
+                  {item.quantity}x {item.name}
+                </Text>
+                <Text style={styles.productPrice}>{item.total} zł</Text>
               </View>
             ))}
+          </View>
+
+          <View style={styles.noteSection}>
+            <Text style={styles.sectionTitle}>Notatka</Text>
+            <TextInput
+              style={styles.noteInput}
+              placeholder="Dodaj notatkę do zamówienia (max 600 znaków)"
+              value={note}
+              onChangeText={(text) => setNote(text.slice(0, 600))}
+              multiline
+              numberOfLines={4}
+              maxLength={600}
+            />
+            <Text style={styles.charCount}>{note.length}/600</Text>
           </View>
 
           <View style={styles.deliverySection}>
@@ -330,15 +271,6 @@ export function EditOrderModal({ visible, onClose, order }: EditOrderModalProps)
               />
               <Text>Dowóz</Text>
             </View>
-            {isDelivery && (
-              <TextInput
-                style={[styles.input, { marginTop: 12 }]}
-                placeholder="Koszt dowozu"
-                value={deliveryCost}
-                onChangeText={setDeliveryCost}
-                keyboardType="numeric"
-              />
-            )}
           </View>
 
           <View style={styles.dateTimeSection}>
@@ -503,23 +435,25 @@ const styles = StyleSheet.create({
   productPrice: {
     fontSize: 16,
     color: '#374151',
-    marginRight: 16,
+    marginLeft: 16,
   },
-  quantityControls: {
-    flexDirection: 'row',
-    alignItems: 'center',
+  noteSection: {
+    marginBottom: 24,
+  },
+  noteInput: {
     backgroundColor: '#F3F4F6',
     borderRadius: 8,
-    padding: 4,
-  },
-  quantityButton: {
-    padding: 8,
-  },
-  quantity: {
-    width: 32,
-    textAlign: 'center',
+    padding: 12,
     fontSize: 16,
     color: '#111827',
+    height: 100,
+    textAlignVertical: 'top',
+  },
+  charCount: {
+    fontSize: 12,
+    color: '#6B7280',
+    textAlign: 'right',
+    marginTop: 4,
   },
   deliverySection: {
     marginBottom: 24,
@@ -562,7 +496,7 @@ const styles = StyleSheet.create({
   submitButton: {
     backgroundColor: '#FFFFFF',
     borderWidth: 1,
-    borderColor: 'rgb(0, 115, 230)',
+    borderColor: '#0073E6',
     padding: 16,
     alignItems: 'center',
     margin: 16,
@@ -573,7 +507,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#F3F4F6',
   },
   submitButtonText: {
-    color: 'rgb(0, 115, 230)',
+    color: '#0073E6',
     fontSize: 16,
     fontWeight: '500',
   },
@@ -581,5 +515,3 @@ const styles = StyleSheet.create({
     color: '#9CA3AF',
   },
 });
-
-export { EditOrderModal }

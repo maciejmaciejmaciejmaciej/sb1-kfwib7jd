@@ -16,6 +16,49 @@ export async function getWooCommerceSettings(): Promise<WooCommerceSettings | nu
   }
 }
 
+export async function validateStoreCredentials(settings: WooCommerceSettings): Promise<{ 
+  isValid: boolean;
+  storeName?: string;
+  error?: string;
+}> {
+  const { storeUrl, consumerKey, consumerSecret } = settings;
+  const auth = btoa(`${consumerKey}:${consumerSecret}`);
+
+  try {
+    // Try to fetch store info to validate credentials
+    const response = await fetch(`${storeUrl}/wp-json/wc/v3/system_status`, {
+      headers: {
+        Authorization: `Basic ${auth}`,
+        'Content-Type': 'application/json',
+      },
+    });
+
+    if (!response.ok) {
+      if (response.status === 401) {
+        return { 
+          isValid: false, 
+          error: 'Invalid credentials. Please check your Consumer Key and Secret.' 
+        };
+      }
+      return { 
+        isValid: false, 
+        error: 'Could not connect to the store. Please check the Store URL.' 
+      };
+    }
+
+    const data = await response.json();
+    return {
+      isValid: true,
+      storeName: data.environment?.name || 'Unknown Store'
+    };
+  } catch (error) {
+    return { 
+      isValid: false, 
+      error: 'Failed to connect to the store. Please check your internet connection and store URL.' 
+    };
+  }
+}
+
 export async function saveWooCommerceSettings(settings: WooCommerceSettings): Promise<void> {
   try {
     // Validate settings before saving
@@ -74,6 +117,7 @@ export async function fetchOrders(settings: WooCommerceSettings, params: Record<
       Authorization: `Basic ${auth}`,
       'Content-Type': 'application/json',
     },
+    cache: 'no-store',
   });
 
   if (!response.ok) {
@@ -117,85 +161,57 @@ export async function updateOrder(
   const auth = btoa(`${consumerKey}:${consumerSecret}`);
 
   try {
-    // First, get the current order to get its status and line items
+    // Get current order to preserve status
     const currentOrder = await fetchSingleOrder(settings, parseInt(orderId));
     const originalStatus = currentOrder.status;
 
-    // Set status to pending temporarily
-    await updateOrderStatus(settings, orderId, 'pending');
-
-    // Create a map of current line items by product ID
-    const currentLineItems = new Map();
+    // Create a map of existing line items by product ID
+    const existingLineItems = new Map();
     currentOrder.line_items.forEach((item: any) => {
-      const existingItem = currentLineItems.get(item.product_id);
-      if (existingItem) {
-        existingItem.quantity += item.quantity;
-      } else {
-        currentLineItems.set(item.product_id, {
+      existingLineItems.set(item.product_id, item.id);
+    });
+
+    // Create line items array with preserved IDs where possible
+    const lineItems = orderData.line_items
+      .filter((item: any) => item.quantity > 0) // Only include items with quantity > 0
+      .map((item: any) => {
+        const existingId = existingLineItems.get(item.product_id);
+        return {
+          id: existingId, // Include ID if it exists
+          product_id: item.product_id,
+          quantity: item.quantity,
+        };
+      });
+
+    // Add items to be deleted (set quantity to 0)
+    currentOrder.line_items.forEach((item: any) => {
+      const hasNewQuantity = orderData.line_items.some(
+        (newItem: any) => newItem.product_id === item.product_id && newItem.quantity > 0
+      );
+      if (!hasNewQuantity) {
+        lineItems.push({
           id: item.id,
           product_id: item.product_id,
-          quantity: item.quantity
+          quantity: 0,
         });
       }
     });
 
-    // Process new line items, consolidating quantities
-    const newLineItems = new Map();
-    orderData.line_items.forEach((item: any) => {
-      const existingItem = newLineItems.get(item.product_id);
-      if (existingItem) {
-        existingItem.quantity += item.quantity;
-      } else {
-        newLineItems.set(item.product_id, {
-          product_id: item.product_id,
-          quantity: item.quantity
-        });
-      }
-    });
+    // Prepare the update payload
+    const updatePayload = {
+      ...orderData,
+      line_items: lineItems,
+      fee_lines: orderData.fee_lines || [],
+    };
 
-    // Create final line items array
-    const lineItems = [];
-    newLineItems.forEach((newItem, productId) => {
-      const currentItem = currentLineItems.get(productId);
-      if (currentItem && newItem.quantity > 0) {
-        // Update existing item
-        lineItems.push({
-          id: currentItem.id,
-          product_id: productId,
-          quantity: newItem.quantity
-        });
-      } else if (newItem.quantity > 0) {
-        // Add new item
-        lineItems.push({
-          product_id: productId,
-          quantity: newItem.quantity
-        });
-      }
-    });
-
-    // Add items to be deleted (those in current order but not in new order or with quantity 0)
-    currentLineItems.forEach((currentItem, productId) => {
-      const newItem = newLineItems.get(productId);
-      if (!newItem || newItem.quantity === 0) {
-        lineItems.push({
-          id: currentItem.id,
-          product_id: productId,
-          quantity: 0
-        });
-      }
-    });
-
-    // Update the order with consolidated line items
+    // Update the order
     const response = await fetch(`${storeUrl}/wp-json/wc/v3/orders/${orderId}`, {
       method: 'PUT',
       headers: {
         Authorization: `Basic ${auth}`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({
-        ...orderData,
-        line_items: lineItems,
-      }),
+      body: JSON.stringify(updatePayload),
     });
 
     if (!response.ok) {
@@ -209,8 +225,10 @@ export async function updateOrder(
       throw new Error(errorData.message || `Failed to update order: ${response.statusText}`);
     }
 
-    // Set the status back to the original status
-    await updateOrderStatus(settings, orderId, originalStatus);
+    // Restore original status if it was not pending
+    if (originalStatus !== 'pending') {
+      await updateOrderStatus(settings, orderId, originalStatus);
+    }
 
     const data = await response.json();
     return data;
@@ -224,7 +242,7 @@ export async function fetchProducts(settings: WooCommerceSettings) {
   const { storeUrl, consumerKey, consumerSecret } = settings;
   const auth = btoa(`${consumerKey}:${consumerSecret}`);
 
-  const response = await fetch(`${storeUrl}/wp-json/wc/v3/products`, {
+  const response = await fetch(`${storeUrl}/wp-json/wc/v3/products?per_page=100`, {
     headers: {
       Authorization: `Basic ${auth}`,
       'Content-Type': 'application/json',
@@ -288,7 +306,22 @@ export async function fetchCategories(settings: WooCommerceSettings) {
   const { storeUrl, consumerKey, consumerSecret } = settings;
   const auth = btoa(`${consumerKey}:${consumerSecret}`);
 
-  const response = await fetch(`${storeUrl}/wp-json/wc/v3/products/categories`, {
+  // First, get the total number of categories
+  const countResponse = await fetch(`${storeUrl}/wp-json/wc/v3/products/categories?per_page=1`, {
+    headers: {
+      Authorization: `Basic ${auth}`,
+      'Content-Type': 'application/json',
+    },
+  });
+
+  if (!countResponse.ok) {
+    throw new Error(`Failed to fetch categories count: ${countResponse.statusText}`);
+  }
+
+  const totalCategories = parseInt(countResponse.headers.get('X-WP-Total') || '0');
+  
+  // Now fetch all categories in one request
+  const response = await fetch(`${storeUrl}/wp-json/wc/v3/products/categories?per_page=${totalCategories}`, {
     headers: {
       Authorization: `Basic ${auth}`,
       'Content-Type': 'application/json',
